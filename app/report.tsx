@@ -4,7 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography } from '../src/theme';
 import { GroupedSection } from '../src/components/GroupedSection';
-import { downloadReport, ReportType } from '../src/services/api/report';
+import { fetchReportData, ReportType } from '../src/services/api/report';
+import { generateReportPdf, shareReportPdf } from '../src/services/pdfGenerator';
 
 function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
@@ -29,9 +30,6 @@ export default function ReportScreen() {
   const [generating, setGenerating] = useState(false);
 
   const maxDay = getDaysInMonth(selectedYear, selectedMonth);
-  if (selectedDay > maxDay) {
-    // silently clamp; will be corrected on next render
-  }
   const clampedDay = Math.min(selectedDay, maxDay);
 
   const handlePrev = () => {
@@ -76,28 +74,34 @@ export default function ReportScreen() {
     : formatMonthYear(selectedYear, selectedMonth);
 
   const handleGenerate = async () => {
+    if (generating) return;
     setGenerating(true);
     try {
-      const result = await downloadReport(reportType, dateParam);
-      setGenerating(false);
+      const result = await fetchReportData(reportType, dateParam);
 
-      if (!result.ok) {
+      if (!result.ok || !result.data) {
+        setGenerating(false);
         Alert.alert('Report Failed', result.error || 'Unable to generate report.');
         return;
       }
 
-      const Sharing = require('expo-sharing');
-      const FileSystem = require('expo-file-system');
-      const fileUri = FileSystem.cacheDirectory + result.filename;
-      await FileSystem.writeAsStringAsync(fileUri, result.csv, { encoding: FileSystem.EncodingType.UTF8 });
-      await Sharing.shareAsync(fileUri, {
-        mimeType: 'text/csv',
-        dialogTitle: `Share ${reportType} report`,
-        UTI: 'public.comma-separated-values-text',
-      });
+      const pdfResult = await generateReportPdf(result.data);
+
+      if (!pdfResult.ok || !pdfResult.uri) {
+        setGenerating(false);
+        Alert.alert('PDF Error', pdfResult.error || 'Unable to create PDF file.');
+        return;
+      }
+
+      const shareResult = await shareReportPdf(pdfResult.uri, reportType === 'daily' ? 'Daily' : 'Monthly');
+      setGenerating(false);
+
+      if (!shareResult.ok) {
+        Alert.alert('Share Failed', shareResult.error || 'PDF was created but could not be shared.');
+      }
     } catch (error) {
       setGenerating(false);
-      Alert.alert('Error', 'Unable to share report. Please try again.');
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
     }
   };
 
@@ -161,7 +165,7 @@ export default function ReportScreen() {
           <View style={styles.previewRow}>
             <Ionicons name="document-text-outline" size={20} color={colors.textSecondary} />
             <View style={styles.previewTextContainer}>
-              <Text style={styles.previewLabel}>orbit-report-{dateParam}.csv</Text>
+              <Text style={styles.previewLabel}>orbit-report-{dateParam}.pdf</Text>
               <Text style={styles.previewDescription}>
                 {reportType === 'daily' ? 'Daily' : 'Monthly'} activity report
               </Text>

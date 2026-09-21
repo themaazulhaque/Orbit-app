@@ -1,37 +1,48 @@
-import { getAccessToken } from './client';
+import { apiRequest } from './client';
 
 export type ReportType = 'daily' | 'monthly';
 
-export async function downloadReport(
+export interface ReportSession {
+  app_name: string;
+  package_name: string;
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+  duration_minutes: number;
+  source: string;
+}
+
+export interface ReportData {
+  report_type: ReportType;
+  date: string;
+  total_sessions: number;
+  total_duration_seconds: number;
+  total_duration_minutes: number;
+  unique_apps: number;
+  sessions: ReportSession[];
+}
+
+export async function fetchReportData(
   type: ReportType,
   date: string,
-): Promise<{ ok: boolean; csv?: string; filename?: string; error?: string }> {
-  try {
-    const token = await getAccessToken();
-    if (!token) return { ok: false, error: 'Not authenticated' };
+): Promise<{ ok: boolean; data?: ReportData; error?: string }> {
+  const result = await apiRequest<ReportData>(
+    `/usage/report/?type=${type}&date=${date}&format=json`,
+  );
 
-    const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://chronicle-backend-gvy4.onrender.com/api/v1';
-    const url = `${API_URL}/usage/report/?type=${type}&date=${date}`;
-
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      let errorMsg = `HTTP ${response.status}`;
-      try {
-        const data = JSON.parse(text);
-        if (data.error) errorMsg = data.error;
-      } catch {}
-      return { ok: false, error: errorMsg };
+  if (!result.ok) {
+    let errorMsg = result.error || 'Failed to fetch report data';
+    if (result.status === 401) {
+      errorMsg = 'Your session has expired. Please sign in again.';
+    } else if (result.status === 403) {
+      errorMsg = 'You do not have permission to access this data.';
+    } else if (result.status === 404) {
+      errorMsg = 'Report endpoint not found. Please update the app.';
+    } else if (result.status >= 500) {
+      errorMsg = 'Server error. Please try again later.';
     }
-
-    const csv = await response.text();
-    const filename = `orbit-report-${date}.csv`;
-    return { ok: true, csv, filename };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Network error';
-    return { ok: false, error: msg };
+    return { ok: false, error: errorMsg };
   }
+
+  return { ok: true, data: result.data || undefined };
 }

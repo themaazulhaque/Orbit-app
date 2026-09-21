@@ -5,5 +5,5 @@ export { registerDevice } from './devices';
 export type { BackendDevice } from './devices';
 export { syncUsage, getActivity } from './usage';
 export type { SyncSession, SyncResult, ActivitySession, ActivityResponse } from './usage';
-export { downloadReport } from './report';
-export type { ReportType } from './report';
+export { fetchReportData } from './report';
+export type { ReportType, ReportSession, ReportData } from './report';
