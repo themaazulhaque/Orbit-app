@@ -1,21 +1,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { colors, spacing, typography } from '../../src/theme';
 import { GroupedSection } from '../../src/components/GroupedSection';
 import { SettingsRow } from '../../src/components/SettingsRow';
 import { UpdateModal } from '../../src/components/UpdateModal';
 import { usageTrackingService } from '../../src/services/usageTrackingService';
 import { usageSyncService, SyncStatus } from '../../src/services/usageSyncService';
-import { getStoredDeviceId, logout } from '../../src/services/api';
-import { useAuth } from '../../src/contexts/AuthContext';
+import { getStoredDeviceId } from '../../src/services/api';
 import { TrackingStatus } from '../../src/types';
 import { checkForUpdate, getInstalledVersionName, UpdateInfo } from '../../src/services/updateService';
 
 const HEALTH_URL = 'https://chronicle-backend-gvy4.onrender.com/health';
 
 export default function SettingsScreen() {
-  const auth = useAuth();
+  const router = useRouter();
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(usageSyncService.getStatus());
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>({
     usageAccessGranted: false,
@@ -87,13 +87,6 @@ export default function SettingsScreen() {
 
   const handleUsageAccess = () => {
     usageTrackingService.openUsageAccessSettings();
-  };
-
-  const handleLogout = async () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: async () => { await logout(); auth.refreshAuth(); } },
-    ]);
   };
 
   const handleCheckForUpdate = async () => {
@@ -222,6 +215,14 @@ export default function SettingsScreen() {
             onPress={handleSync}
             loading={syncLoading}
           />
+          <View style={styles.separator} />
+          <SettingsRow
+            label="Download Report"
+            description="Export your activity data as a CSV file."
+            icon="document-text"
+            iconColor={colors.accent}
+            onPress={() => router.push('/report')}
+          />
         </GroupedSection>
 
         <GroupedSection header="Cloud">
@@ -239,16 +240,6 @@ export default function SettingsScreen() {
             value={deviceId ? deviceId.substring(0, 8) + '...' : 'Not registered'}
             icon="phone-portrait"
             iconColor={colors.textSecondary}
-          />
-        </GroupedSection>
-
-        <GroupedSection header="Account">
-          <SettingsRow
-            label="Sign Out"
-            icon="log-out"
-            iconColor={colors.danger}
-            onPress={handleLogout}
-            destructive
           />
         </GroupedSection>
 

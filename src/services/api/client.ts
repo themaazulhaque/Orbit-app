@@ -18,7 +18,7 @@ export interface ApiResponse<T> {
   error: string | null;
 }
 
-async function getAccessToken(): Promise<string | null> {
+export async function getAccessToken(): Promise<string | null> {
   return SecureStore.getItemAsync('chronicle_access_token');
 }
 
