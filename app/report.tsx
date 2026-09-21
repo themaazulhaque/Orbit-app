@@ -76,32 +76,54 @@ export default function ReportScreen() {
   const handleGenerate = async () => {
     if (generating) return;
     setGenerating(true);
+
+    const reportLabel = reportType === 'daily' ? 'Daily' : 'Monthly';
+    console.log(`[REPORT] download started — type=${reportType}, date=${dateParam}`);
+
     try {
+      console.log('[REPORT] requesting report data...');
       const result = await fetchReportData(reportType, dateParam);
 
       if (!result.ok || !result.data) {
-        setGenerating(false);
+        console.log(`[REPORT] report API failed — ${result.error}`);
         Alert.alert('Report Failed', result.error || 'Unable to generate report.');
         return;
       }
 
+      console.log(`[REPORT] report API success — ${result.data.sessions.length} sessions, ${result.data.total_duration_minutes}min total`);
+      console.log('[REPORT] generating PDF...');
+
       const pdfResult = await generateReportPdf(result.data);
 
       if (!pdfResult.ok || !pdfResult.uri) {
-        setGenerating(false);
+        console.log(`[REPORT] PDF generation failed — ${pdfResult.error}`);
         Alert.alert('PDF Error', pdfResult.error || 'Unable to create PDF file.');
         return;
       }
 
-      const shareResult = await shareReportPdf(pdfResult.uri, reportType === 'daily' ? 'Daily' : 'Monthly');
-      setGenerating(false);
+      console.log(`[REPORT] PDF generation completed — ${pdfResult.filename}`);
+      console.log('[REPORT] preparing Android share/download...');
 
-      if (!shareResult.ok) {
-        Alert.alert('Share Failed', shareResult.error || 'PDF was created but could not be shared.');
+      const shareResult = await shareReportPdf(pdfResult.uri, reportLabel);
+
+      if (shareResult.ok) {
+        if (shareResult.savedPath) {
+          console.log(`[REPORT] PDF saved to ${shareResult.savedPath}`);
+          Alert.alert('Report Saved', `PDF saved to your documents:\n${shareResult.savedPath}`);
+        } else {
+          console.log('[REPORT] share/download completed');
+        }
+      } else {
+        console.log(`[REPORT] share/download failed — ${shareResult.error}`);
+        Alert.alert('Report Failed', shareResult.error || 'PDF was created but could not be saved.');
       }
     } catch (error) {
-      setGenerating(false);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      console.log(`[REPORT] unexpected error — ${msg}`);
       Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
+      console.log('[REPORT] download flow completed');
+      setGenerating(false);
     }
   };
 

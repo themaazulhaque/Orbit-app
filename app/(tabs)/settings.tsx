@@ -218,7 +218,7 @@ export default function SettingsScreen() {
           <View style={styles.separator} />
           <SettingsRow
             label="Download Report"
-            description="Export your activity data as a CSV file."
+            description="Export your activity data as a PDF report."
             icon="document-text"
             iconColor={colors.accent}
             onPress={() => router.push('/report')}

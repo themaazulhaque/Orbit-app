@@ -3,6 +3,8 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { ReportData } from './api/report';
 
+const TAG = '[PDF]';
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -156,10 +158,42 @@ function buildHtml(data: ReportData, generatedAt: string): string {
 </html>`;
 }
 
+async function verifyFile(uri: string): Promise<{ exists: boolean; size: number }> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return {
+      exists: info.exists,
+      size: info.exists && 'size' in info ? info.size : 0,
+    };
+  } catch {
+    return { exists: false, size: 0 };
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms / 1000}s`));
+    }, ms);
+
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 export async function generateReportPdf(
   data: ReportData,
 ): Promise<{ ok: boolean; uri?: string; filename?: string; error?: string }> {
   try {
+    console.log(`${TAG} generateReportPdf started — type=${data.report_type}, date=${data.date}, sessions=${data.sessions.length}`);
+
     const now = new Date();
     const generatedAt = now.toLocaleString('en-US', {
       year: 'numeric', month: 'long', day: 'numeric',
@@ -167,19 +201,41 @@ export async function generateReportPdf(
     });
 
     const html = buildHtml(data, generatedAt);
+    console.log(`${TAG} HTML built — ${html.length} chars`);
 
-    const { uri } = await Print.printToFileAsync({ html });
+    console.log(`${TAG} Calling Print.printToFileAsync...`);
+    const { uri } = await withTimeout(
+      Print.printToFileAsync({ html }),
+      30000,
+      'Print.printToFileAsync',
+    );
+    console.log(`${TAG} Print.printToFileAsync returned uri=${uri}`);
 
-    const filename = data.report_type === 'daily'
-      ? `orbit-report-${data.date}.pdf`
-      : `orbit-report-${data.date}.pdf`;
+    const srcCheck = await verifyFile(uri);
+    console.log(`${TAG} Source file check — exists=${srcCheck.exists}, size=${srcCheck.size}`);
 
+    if (!srcCheck.exists || srcCheck.size === 0) {
+      return { ok: false, error: 'PDF file was not created. Please try again.' };
+    }
+
+    const filename = `orbit-report-${data.date}.pdf`;
     const destUri = FileSystem.cacheDirectory + filename;
-    await FileSystem.moveAsync({ from: uri, to: destUri });
 
+    await FileSystem.moveAsync({ from: uri, to: destUri });
+    console.log(`${TAG} File moved to ${destUri}`);
+
+    const destCheck = await verifyFile(destUri);
+    console.log(`${TAG} Destination file check — exists=${destCheck.exists}, size=${destCheck.size}`);
+
+    if (!destCheck.exists || destCheck.size === 0) {
+      return { ok: false, error: 'PDF file was not created. Please try again.' };
+    }
+
+    console.log(`${TAG} generateReportPdf completed OK — uri=${destUri}`);
     return { ok: true, uri: destUri, filename };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'PDF generation failed';
+    console.log(`${TAG} generateReportPdf FAILED — ${msg}`);
     return { ok: false, error: msg };
   }
 }
@@ -187,22 +243,72 @@ export async function generateReportPdf(
 export async function shareReportPdf(
   uri: string,
   reportType: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; savedPath?: string; error?: string }> {
   try {
-    const canShare = await Sharing.isAvailableAsync();
-    if (!canShare) {
-      return { ok: false, error: 'Sharing is not available on this device' };
+    console.log(`${TAG} shareReportPdf started — uri=${uri}`);
+
+    const fileCheck = await verifyFile(uri);
+    console.log(`${TAG} File check before share — exists=${fileCheck.exists}, size=${fileCheck.size}`);
+
+    if (!fileCheck.exists || fileCheck.size === 0) {
+      console.log(`${TAG} File does not exist or is empty, cannot share`);
+      return { ok: false, error: 'PDF file is missing or empty. Please try generating again.' };
     }
 
-    await Sharing.shareAsync(uri, {
-      mimeType: 'application/pdf',
-      dialogTitle: `Share ${reportType} report`,
-      UTI: 'com.adobe.pdf',
-    });
+    const canShare = await Sharing.isAvailableAsync();
+    console.log(`${TAG} Sharing available: ${canShare}`);
 
+    if (!canShare) {
+      console.log(`${TAG} Sharing not available, saving to documents instead`);
+      return await saveToDocuments(uri, reportType);
+    }
+
+    console.log(`${TAG} Calling Sharing.shareAsync...`);
+    await withTimeout(
+      Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: `${reportType} Usage Report`,
+        UTI: 'com.adobe.pdf',
+      }),
+      60000,
+      'Sharing.shareAsync',
+    );
+
+    console.log(`${TAG} shareReportPdf completed OK`);
     return { ok: true };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to share report';
-    return { ok: false, error: msg };
+    console.log(`${TAG} shareReportPdf FAILED — ${msg}`);
+    console.log(`${TAG} Attempting fallback: save to documents...`);
+    return await saveToDocuments(uri, reportType);
+  }
+}
+
+async function saveToDocuments(
+  uri: string,
+  reportType: string,
+): Promise<{ ok: boolean; savedPath?: string; error?: string }> {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `orbit-${reportType.toLowerCase()}-report-${timestamp}.pdf`;
+    const documentsDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    const destUri = documentsDir + filename;
+
+    console.log(`${TAG} Saving PDF to documents: ${destUri}`);
+    await FileSystem.copyAsync({ from: uri, to: destUri });
+
+    const check = await verifyFile(destUri);
+    console.log(`${TAG} Documents file check — exists=${check.exists}, size=${check.size}`);
+
+    if (!check.exists || check.size === 0) {
+      return { ok: false, error: 'PDF was generated but could not be saved. Please try again.' };
+    }
+
+    console.log(`${TAG} PDF saved to ${destUri}`);
+    return { ok: true, savedPath: destUri };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Failed to save PDF';
+    console.log(`${TAG} saveToDocuments FAILED — ${msg}`);
+    return { ok: false, error: 'PDF was generated but could not be saved to device storage.' };
   }
 }
