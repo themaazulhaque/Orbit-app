@@ -13,6 +13,13 @@ export interface BackendDevice {
   updated_at: string;
 }
 
+interface DeviceListResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: BackendDevice[];
+}
+
 export interface RegisterDeviceResult {
   ok: boolean;
   deviceId?: string;
@@ -56,9 +63,10 @@ export async function registerDevice(): Promise<RegisterDeviceResult> {
   const existingIdentifier = await getStoredDeviceIdentifier();
 
   if (existingDeviceId) {
-    const listResult = await apiRequest<BackendDevice[]>('/devices/');
-    if (listResult.ok && Array.isArray(listResult.data)) {
-      const matched = listResult.data.find(device => device.id === existingDeviceId);
+    const listResult = await apiRequest<DeviceListResponse>('/devices/');
+    const devices = listResult.data?.results;
+    if (listResult.ok && Array.isArray(devices)) {
+      const matched = devices.find(device => device.id === existingDeviceId);
       if (matched) {
         await storeDeviceId(existingDeviceId);
         console.log(`[DEVICE] Reconciled existing device: ${existingDeviceId}`);
