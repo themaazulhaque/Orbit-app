@@ -193,6 +193,11 @@ export async function apiRequest<T>(
       if (refreshResult.ok && refreshResult.access) {
         headers['Authorization'] = `Bearer ${refreshResult.access}`;
         response = await fetchWithTimeout(url, { ...options, headers }, REQUEST_TIMEOUT_MS);
+        if (response.status === 401) {
+          console.log('[API] Fresh token still rejected; session unrecoverable');
+          await markSessionUnrecoverable();
+          return { ok: false, status: 401, data: null, error: 'Your session has expired. Please sign in again.', kind: 'auth' };
+        }
       } else if (!refreshResult.transitory) {
         console.log('[API] Session unrecoverable after failed refresh');
         return { ok: false, status: 401, data: null, error: 'Your session has expired. Please sign in again.', kind: 'auth' };
