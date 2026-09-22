@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
@@ -13,7 +13,9 @@ import { checkForUpdate, UpdateInfo } from '../src/services/updateService';
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
-  const { isReady } = useAuth();
+  const router = useRouter();
+  const segments = useSegments();
+  const { isReady, isLoggedIn, sessionExpired } = useAuth();
   const [showBrandedSplash, setShowBrandedSplash] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -38,6 +40,14 @@ function RootLayoutNav() {
       return () => clearTimeout(timer);
     }
   }, [isReady, performUpdateCheck]);
+
+  const isOnAuthRoute = segments[0] === '(auth)';
+
+  useEffect(() => {
+    if (isReady && sessionExpired && !isLoggedIn && !isOnAuthRoute) {
+      router.replace('/(auth)/login');
+    }
+  }, [isReady, sessionExpired, isLoggedIn, isOnAuthRoute, router]);
 
   return (
     <>

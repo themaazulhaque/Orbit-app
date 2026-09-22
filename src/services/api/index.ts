@@ -1,4 +1,5 @@
-export { apiRequest, isAuthenticated, storeTokens, clearTokens, getStoredUserId, getStoredDeviceId, storeDeviceId, getAccessToken } from './client';
+export { apiRequest, isAuthenticated, storeTokens, clearTokens, getStoredUserId, getStoredDeviceId, storeDeviceId, getAccessToken, onAuthSessionExpired } from './client';
+export type { ApiResponse, ApiResponseKind } from './client';
 export { register, login, logout, getCurrentUser } from './auth';
 export type { AuthUser, AuthTokens, LoginRequest, RegisterRequest } from './auth';
 export { registerDevice } from './devices';

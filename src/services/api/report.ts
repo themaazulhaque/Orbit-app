@@ -32,12 +32,14 @@ export async function fetchReportData(
 
   if (!result.ok) {
     let errorMsg = result.error || 'Failed to fetch report data';
-    if (result.status === 401) {
+    if (result.kind === 'network') {
+      errorMsg = 'No internet connection. Please check your connection and try again.';
+    } else if (result.kind === 'auth') {
       errorMsg = 'Your session has expired. Please sign in again.';
     } else if (result.status === 403) {
       errorMsg = 'You do not have permission to access this data.';
     } else if (result.status === 404) {
-      errorMsg = 'Report endpoint not found. Please update the app.';
+      errorMsg = 'Report data not found for this date.';
     } else if (result.status >= 500) {
       errorMsg = 'Server error. Please try again later.';
     }
