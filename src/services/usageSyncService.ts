@@ -59,7 +59,7 @@ export const usageSyncService = {
         const message = registration.kind === 'network'
           ? 'No internet connection. Please check your connection and try again.'
           : registration.kind === 'auth'
-            ? 'Your session has expired. Please sign in again.'
+            ? 'Session could not be restored. Please try again.'
             : (registration.error || 'Device registration failed.');
         currentStatus = { ...currentStatus, isSyncing: false, lastSyncResult: message };
         notifyListeners();

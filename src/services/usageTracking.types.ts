@@ -11,6 +11,7 @@ export type {
 export interface ChronicleUsageNativeModule {
   isUsageAccessGranted(): Promise<boolean>;
   openUsageAccessSettings(): Promise<void>;
+  getInstallationId(): Promise<string>;
   getInstalledApps(): Promise<import('../types').InstalledApp[]>;
   getUsageStats(startTime: number, endTime: number): Promise<import('../types').AppUsageRecord[]>;
   getStoredUsageStats(startTime: number, endTime: number): Promise<import('../types').AppUsageRecord[]>;

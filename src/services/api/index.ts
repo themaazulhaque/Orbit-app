@@ -1,5 +1,5 @@
-export { apiRequest, isAuthenticated, storeTokens, clearTokens, getStoredUserId, getStoredDeviceId, storeDeviceId, getStoredDeviceIdentifier, storeDeviceIdentifier, refreshNativeAuthState, getAccessToken, onAuthSessionExpired } from './client';
-export type { ApiResponse, ApiResponseKind } from './client';
+export { apiRequest, isAuthenticated, storeTokens, clearTokens, getStoredUserId, getStoredDeviceId, storeDeviceId, getStoredDeviceIdentifier, storeDeviceIdentifier, refreshNativeAuthState, getAccessToken, onAuthSessionExpired, bootstrapSession, getOrCreateInstallationId } from './client';
+export type { ApiResponse, ApiResponseKind, BootstrapResult } from './client';
 export { register, login, logout, getCurrentUser } from './auth';
 export type { AuthUser, AuthTokens, LoginRequest, RegisterRequest } from './auth';
 export { registerDevice } from './devices';

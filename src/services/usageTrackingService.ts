@@ -47,6 +47,15 @@ export const usageTrackingService = {
     return nativeModule!.isUsageAccessGranted();
   },
 
+  async getInstallationId(): Promise<string | null> {
+    if (!this.hasNativeModule() || this.isExpoGo()) return null;
+    try {
+      return await nativeModule!.getInstallationId();
+    } catch {
+      return null;
+    }
+  },
+
   async openUsageAccessSettings(): Promise<void> {
     if (this.hasNativeModule()) await nativeModule!.openUsageAccessSettings();
   },

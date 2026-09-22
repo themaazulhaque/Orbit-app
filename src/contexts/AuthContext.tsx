@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import { isAuthenticated, getStoredUserId, registerDevice, apiRequest, onAuthSessionExpired } from '../services/api';
+import { getStoredUserId, getStoredDeviceId, registerDevice, apiRequest, bootstrapSession, onAuthSessionExpired } from '../services/api';
 import { usageTrackingService } from '../services/usageTrackingService';
 import type { AuthUser } from '../services/api/auth';
 
@@ -35,64 +35,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshAuth: async () => {},
   });
 
-  const setLoggedOut = useCallback((sessionExpired: boolean): void => {
+  const setLoggedIn = useCallback((userId: string | null, deviceId: string | null): void => {
+    setState(prev => ({
+      ...prev,
+      isReady: true,
+      isLoggedIn: true,
+      sessionExpired: false,
+      userId,
+      deviceId: deviceId ?? prev.deviceId,
+    }));
+  }, []);
+
+  const setUnavailable = useCallback((): void => {
     setState(prev => ({
       ...prev,
       isReady: true,
       isLoggedIn: false,
-      sessionExpired,
-      userId: null,
-      deviceId: null,
+      sessionExpired: false,
     }));
   }, []);
 
   const refreshAuth = useCallback(async () => {
     try {
-      const authed = await isAuthenticated();
-      if (authed) {
-        const userId = await getStoredUserId();
-        const meResult = await apiRequest<AuthUser>('/auth/me/');
-        if (meResult.kind === 'auth') {
-          setLoggedOut(true);
+      let meResult = await apiRequest<AuthUser>('/auth/me/');
+      if (meResult.kind === 'auth') {
+        console.log('[AUTH] Session validation failed; bootstrapping automatic session');
+        const boot = await bootstrapSession();
+        if (boot.ok) {
+          meResult = await apiRequest<AuthUser>('/auth/me/');
+        } else {
+          if (boot.kind === 'network') {
+            const storedUserId = await getStoredUserId();
+            const storedDeviceId = await getStoredDeviceId();
+            setLoggedIn(storedUserId, storedDeviceId);
+            return;
+          }
+          setUnavailable();
           return;
         }
-        if (meResult.ok && meResult.data) {
-          const currentUser = meResult.data;
-          const deviceResult = await registerDevice();
-          await usageTrackingService.ensureBackgroundTrackingScheduled();
-          setState(prev => ({
-            ...prev,
-            isReady: true,
-            isLoggedIn: true,
-            sessionExpired: false,
-            userId: currentUser.id,
-            deviceId: deviceResult.deviceId || null,
-          }));
-          return;
-        }
-        setState(prev => ({
-          ...prev,
-          isReady: true,
-          isLoggedIn: true,
-          sessionExpired: false,
-          userId,
-          deviceId: prev.deviceId,
-        }));
-      } else {
-        setLoggedOut(false);
       }
+      if (meResult.ok && meResult.data) {
+        const currentUser = meResult.data;
+        const deviceResult = await registerDevice();
+        await usageTrackingService.ensureBackgroundTrackingScheduled();
+        setLoggedIn(currentUser.id, deviceResult.deviceId || null);
+        return;
+      }
+      if (meResult.kind === 'network') {
+        const storedUserId = await getStoredUserId();
+        const storedDeviceId = await getStoredDeviceId();
+        setLoggedIn(storedUserId, storedDeviceId);
+        return;
+      }
+      const storedUserId = await getStoredUserId();
+      const storedDeviceId = await getStoredDeviceId();
+      setLoggedIn(storedUserId, storedDeviceId);
     } catch {
-      setLoggedOut(true);
+      setUnavailable();
     }
-  }, [setLoggedOut]);
+  }, [setLoggedIn, setUnavailable]);
 
   useEffect(() => {
     const unsubscribe = onAuthSessionExpired(() => {
-      setLoggedOut(true);
+      refreshAuth();
     });
     refreshAuth();
     return unsubscribe;
-  }, [refreshAuth, setLoggedOut]);
+  }, [refreshAuth]);
 
   return (
     <AuthContext.Provider value={{ ...state, refreshAuth }}>

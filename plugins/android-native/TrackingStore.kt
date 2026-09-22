@@ -20,6 +20,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
@@ -67,6 +68,7 @@ private const val KEY_REFRESH_TOKEN = "refresh_token"
 private const val KEY_USER_ID = "user_id"
 private const val KEY_DEVICE_ID = "device_id"
 private const val KEY_API_BASE_URL = "api_base_url"
+private const val KEY_INSTALLATION_ID = "installation_id"
 private const val KEY_COLLECTION_SCHEDULED = "collection_scheduled"
 private const val KEY_SYNC_SCHEDULED = "sync_scheduled"
 private const val KEY_LAST_COLLECTION = "last_successful_collection_timestamp"
@@ -188,6 +190,16 @@ object TrackingStore {
     } catch (_: Exception) {
       false
     }
+  }
+
+  @JvmStatic fun getInstallationId(context: Context): String {
+    val prefs = readPreferences(context)
+    val existing = prefs.getString(KEY_INSTALLATION_ID, null)
+    if (!existing.isNullOrBlank()) return existing
+    val generated = UUID.randomUUID().toString()
+    prefs.edit().putString(KEY_INSTALLATION_ID, generated).apply()
+    Log.d(TAG, "Installation identity generated: $generated")
+    return generated
   }
 
   fun isNetworkAvailable(context: Context): Boolean {

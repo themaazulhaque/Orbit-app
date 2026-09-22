@@ -8,6 +8,7 @@ const nativeTrackingModule = NativeModules.ChronicleUsageModule as
       clearAuthState?: () => Promise<void>;
       scheduleBackgroundSync?: () => Promise<boolean>;
       cancelBackgroundSync?: () => Promise<void>;
+      getInstallationId?: () => Promise<string>;
     }
   | undefined;
 
@@ -23,6 +24,7 @@ export interface ApiResponse<T> {
 
 const REQUEST_TIMEOUT_MS = 20000;
 const REFRESH_TIMEOUT_MS = 15000;
+const INSTALLATION_ID_KEY = 'chronicle_installation_id';
 
 interface RefreshResult {
   ok: boolean;
@@ -30,7 +32,15 @@ interface RefreshResult {
   transitory: boolean;
 }
 
+export interface BootstrapResult {
+  ok: boolean;
+  access?: string;
+  error?: string;
+  kind: ApiResponseKind;
+}
+
 let refreshInFlight: Promise<RefreshResult> | null = null;
+let bootstrapInFlight: Promise<BootstrapResult> | null = null;
 let sessionCleared = false;
 
 type AuthFailureListener = () => void;
@@ -66,11 +76,85 @@ async function markSessionUnrecoverable(): Promise<void> {
   });
 }
 
+async function generateInstallationId(): Promise<string> {
+  const randomPart = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  return `inst-${randomPart}`;
+}
+
+export async function getOrCreateInstallationId(): Promise<string> {
+  const stored = await SecureStore.getItemAsync(INSTALLATION_ID_KEY);
+  if (stored) return stored;
+
+  if (Platform.OS === 'android' && nativeTrackingModule?.getInstallationId) {
+    try {
+      const nativeId = await nativeTrackingModule.getInstallationId();
+      if (nativeId && nativeId.length >= 16) {
+        await SecureStore.setItemAsync(INSTALLATION_ID_KEY, nativeId);
+        return nativeId;
+      }
+    } catch {
+      // fall through to JS-generated id
+    }
+  }
+
+  const fallback = await generateInstallationId();
+  await SecureStore.setItemAsync(INSTALLATION_ID_KEY, fallback);
+  return fallback;
+}
+
+async function doBootstrapSession(): Promise<BootstrapResult> {
+  try {
+    const installationId = await getOrCreateInstallationId();
+    console.log('[AUTH] Bootstrapping session with installation identity');
+    const response = await fetchWithTimeout(
+      `${API_URL}/auth/bootstrap/`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installation_id: installationId }),
+      },
+      REQUEST_TIMEOUT_MS,
+    );
+    if (response.status === 200 || response.status === 201) {
+      const data = await response.json();
+      const access: string | undefined = data?.access;
+      const refresh: string | undefined = data?.refresh;
+      const userId: string | undefined = data?.user?.id;
+      if (!access || !refresh || !userId) return { ok: false, kind: 'api', error: 'Bootstrap response was missing token fields.' };
+      await storeTokens(access, refresh);
+      await storeUserId(userId);
+      console.log('[AUTH] Bootstrap session established');
+      return { ok: true, access, kind: 'success' };
+    }
+    console.log(`[AUTH] Bootstrap rejected with HTTP ${response.status}`);
+    return { ok: false, kind: 'api', error: `Bootstrap failed (HTTP ${response.status}).` };
+  } catch (error) {
+    console.log('[AUTH] Bootstrap failed due to network error');
+    return { ok: false, kind: 'network', error: 'No internet connection. Please try again.' };
+  }
+}
+
+export function bootstrapSession(): Promise<BootstrapResult> {
+  if (!bootstrapInFlight) {
+    bootstrapInFlight = doBootstrapSession().finally(() => {
+      bootstrapInFlight = null;
+    });
+  }
+  return bootstrapInFlight;
+}
+
+async function ensureSession(): Promise<BootstrapResult> {
+  const accessToken = await getAccessToken();
+  if (accessToken) return { ok: true, access: accessToken, kind: 'success' };
+  return bootstrapSession();
+}
+
 async function doRefreshTokens(): Promise<RefreshResult> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
-    await markSessionUnrecoverable();
-    return { ok: false, transitory: false };
+    const boot = await ensureSession();
+    if (boot.ok && boot.access) return { ok: true, access: boot.access, transitory: false };
+    return { ok: false, transitory: boot.kind === 'network' };
   }
   try {
     const response = await fetchWithTimeout(
@@ -90,9 +174,11 @@ async function doRefreshTokens(): Promise<RefreshResult> {
       return { ok: true, access, transitory: false };
     }
     if (response.status === 400 || response.status === 401) {
-      console.log('[AUTH] Refresh token rejected; session unrecoverable');
+      console.log('[AUTH] Refresh token rejected; re-bootstrapping automatically');
+      const boot = await ensureSession();
+      if (boot.ok && boot.access) return { ok: true, access: boot.access, transitory: false };
       await markSessionUnrecoverable();
-      return { ok: false, transitory: false };
+      return { ok: false, transitory: boot.kind === 'network' };
     }
     console.log(`[AUTH] Refresh returned ${response.status}; treating as transient`);
     return { ok: false, transitory: true };
@@ -172,12 +258,26 @@ export async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   const url = `${API_URL}${path}`;
-  const accessToken = await getAccessToken();
+  let accessToken = await getAccessToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
   };
+
+  if (!accessToken) {
+    console.log('[API] No access token; bootstrapping automatic session');
+    const boot = await bootstrapSession();
+    if (boot.ok && boot.access) {
+      accessToken = boot.access;
+    } else if (boot.kind === 'network') {
+      console.log('[API] Bootstrap failed due to network issue');
+      return { ok: false, status: 0, data: null, error: 'No internet connection. Please try again.', kind: 'network' };
+    } else {
+      console.log('[API] Bootstrap failed');
+      return { ok: false, status: 401, data: null, error: 'Could not restore your session. Please try again.', kind: 'auth' };
+    }
+  }
 
   if (accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`;
@@ -194,13 +294,25 @@ export async function apiRequest<T>(
         headers['Authorization'] = `Bearer ${refreshResult.access}`;
         response = await fetchWithTimeout(url, { ...options, headers }, REQUEST_TIMEOUT_MS);
         if (response.status === 401) {
-          console.log('[API] Fresh token still rejected; session unrecoverable');
-          await markSessionUnrecoverable();
-          return { ok: false, status: 401, data: null, error: 'Your session has expired. Please sign in again.', kind: 'auth' };
+          console.log('[API] Fresh token still rejected; re-bootstrapping session and retrying once');
+          const boot = await bootstrapSession();
+          if (boot.ok && boot.access) {
+            headers['Authorization'] = `Bearer ${boot.access}`;
+            response = await fetchWithTimeout(url, { ...options, headers }, REQUEST_TIMEOUT_MS);
+            if (response.status === 401) {
+              console.log('[API] Request still rejected after recovery');
+              return { ok: false, status: 401, data: null, error: 'Your session could not be verified. Please try again.', kind: 'auth' };
+            }
+          } else {
+            if (boot.kind === 'network') {
+              return { ok: false, status: 0, data: null, error: 'No internet connection. Please try again.', kind: 'network' };
+            }
+            return { ok: false, status: 401, data: null, error: 'Could not restore your session. Please try again.', kind: 'auth' };
+          }
         }
       } else if (!refreshResult.transitory) {
         console.log('[API] Session unrecoverable after failed refresh');
-        return { ok: false, status: 401, data: null, error: 'Your session has expired. Please sign in again.', kind: 'auth' };
+        return { ok: false, status: 401, data: null, error: 'Could not restore your session. Please try again.', kind: 'auth' };
       } else {
         console.log('[API] Refresh failed due to network issue');
         return { ok: false, status: 0, data: null, error: 'No internet connection. Please try again.', kind: 'network' };

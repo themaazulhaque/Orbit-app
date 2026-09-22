@@ -1,4 +1,4 @@
-import { apiRequest, getStoredDeviceId, storeDeviceId, getStoredDeviceIdentifier, storeDeviceIdentifier } from './client';
+import { apiRequest, getStoredDeviceId, storeDeviceId, getStoredDeviceIdentifier, storeDeviceIdentifier, getOrCreateInstallationId } from './client';
 import * as Device from 'expo-device';
 import type { ApiResponseKind } from './client';
 
@@ -27,11 +27,11 @@ export interface RegisterDeviceResult {
   kind?: ApiResponseKind;
 }
 
-function buildDeviceIdentifier(): string {
+async function buildDeviceIdentifier(): Promise<string> {
   const brand = Device.brand || 'unknown';
   const model = Device.modelName || Device.modelId || 'android';
-  const now = Date.now();
-  return `chronicle-${brand}-${model}-${now}`;
+  const installationId = await getOrCreateInstallationId();
+  return `chronicle-${brand}-${model}-${installationId}`;
 }
 
 async function createDevice(deviceIdentifier: string): Promise<RegisterDeviceResult> {
@@ -44,7 +44,7 @@ async function createDevice(deviceIdentifier: string): Promise<RegisterDeviceRes
       device_name: `${brand} ${model}`,
       device_identifier: deviceIdentifier,
       android_version: Device.osVersion || '',
-      app_version: '1.0.0',
+      app_version: '1.1.0',
     }),
   });
 
@@ -83,6 +83,6 @@ export async function registerDevice(): Promise<RegisterDeviceResult> {
     }
   }
 
-  const deviceIdentifier = existingIdentifier || buildDeviceIdentifier();
+  const deviceIdentifier = existingIdentifier || (await buildDeviceIdentifier());
   return createDevice(deviceIdentifier);
 }

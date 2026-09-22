@@ -53,6 +53,15 @@ public class ChronicleUsageModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
+  public void getInstallationId(Promise promise) {
+    try {
+      promise.resolve(TrackingStore.getInstallationId(context));
+    } catch (Exception error) {
+      promise.reject("INSTALLATION_ID_FAILED", error);
+    }
+  }
+
+  @ReactMethod
   public void openUsageAccessSettings(Promise promise) {
     try {
       context.startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));

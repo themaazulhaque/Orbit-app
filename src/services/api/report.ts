@@ -35,7 +35,7 @@ export async function fetchReportData(
     if (result.kind === 'network') {
       errorMsg = 'No internet connection. Please check your connection and try again.';
     } else if (result.kind === 'auth') {
-      errorMsg = 'Your session has expired. Please sign in again.';
+      errorMsg = 'Session could not be restored. Please try again.';
     } else if (result.status === 403) {
       errorMsg = 'You do not have permission to access this data.';
     } else if (result.status === 404) {
