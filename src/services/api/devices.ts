@@ -1,5 +1,6 @@
-import { apiRequest, getStoredDeviceId, storeDeviceId } from './client';
+import { apiRequest, getStoredDeviceId, storeDeviceId, getStoredDeviceIdentifier, storeDeviceIdentifier } from './client';
 import * as Device from 'expo-device';
+import type { ApiResponseKind } from './client';
 
 export interface BackendDevice {
   id: string;
@@ -12,16 +13,23 @@ export interface BackendDevice {
   updated_at: string;
 }
 
-export async function registerDevice(): Promise<{ ok: boolean; deviceId?: string; error?: string }> {
-  const existingDeviceId = await getStoredDeviceId();
-  if (existingDeviceId) {
-    console.log(`[Device] Already registered: ${existingDeviceId}`);
-    return { ok: true, deviceId: existingDeviceId };
-  }
+export interface RegisterDeviceResult {
+  ok: boolean;
+  deviceId?: string;
+  error?: string;
+  kind?: ApiResponseKind;
+}
 
+function buildDeviceIdentifier(): string {
   const brand = Device.brand || 'unknown';
   const model = Device.modelName || Device.modelId || 'android';
-  const deviceIdentifier = `chronicle-${brand}-${model}-${Date.now()}`;
+  const now = Date.now();
+  return `chronicle-${brand}-${model}-${now}`;
+}
+
+async function createDevice(deviceIdentifier: string): Promise<RegisterDeviceResult> {
+  const brand = Device.brand || 'unknown';
+  const model = Device.modelName || Device.modelId || 'android';
 
   const result = await apiRequest<BackendDevice>('/devices/', {
     method: 'POST',
@@ -33,11 +41,40 @@ export async function registerDevice(): Promise<{ ok: boolean; deviceId?: string
     }),
   });
 
-  if (!result.ok) return { ok: false, error: result.error || 'Device registration failed' };
+  if (!result.ok) return { ok: false, kind: result.kind, error: result.error || 'Device registration failed' };
   if (result.data) {
     await storeDeviceId(result.data.id);
-    console.log(`[Device] Registered: ${result.data.id}`);
-    return { ok: true, deviceId: result.data.id };
+    await storeDeviceIdentifier(deviceIdentifier);
+    console.log(`[DEVICE] Registered: ${result.data.id}`);
+    return { ok: true, deviceId: result.data.id, kind: 'success' };
   }
-  return { ok: false, error: 'No data returned' };
+  return { ok: false, kind: 'api', error: 'No data returned' };
+}
+
+export async function registerDevice(): Promise<RegisterDeviceResult> {
+  const existingDeviceId = await getStoredDeviceId();
+  const existingIdentifier = await getStoredDeviceIdentifier();
+
+  if (existingDeviceId) {
+    const listResult = await apiRequest<BackendDevice[]>('/devices/');
+    if (listResult.ok && Array.isArray(listResult.data)) {
+      const matched = listResult.data.find(device => device.id === existingDeviceId);
+      if (matched) {
+        await storeDeviceId(existingDeviceId);
+        console.log(`[DEVICE] Reconciled existing device: ${existingDeviceId}`);
+        return { ok: true, deviceId: existingDeviceId, kind: 'success' };
+      }
+      console.log(`[DEVICE] Stored device ${existingDeviceId} not found on server; re-registering`);
+    } else if (listResult.kind === 'network' || listResult.kind === 'auth') {
+      return {
+        ok: true,
+        deviceId: existingDeviceId,
+        kind: listResult.kind,
+        error: listResult.error || 'Unable to verify device registration',
+      };
+    }
+  }
+
+  const deviceIdentifier = existingIdentifier || buildDeviceIdentifier();
+  return createDevice(deviceIdentifier);
 }

@@ -1,4 +1,5 @@
 import { apiRequest, getStoredDeviceId } from './client';
+import { registerDevice } from './devices';
 
 export interface SyncSession {
   package_name: string;
@@ -28,24 +29,43 @@ export interface ActivityResponse {
   sessions: ActivitySession[];
 }
 
-export async function syncUsage(sessions: SyncSession[]): Promise<{ ok: boolean; result?: SyncResult; error?: string }> {
-  const deviceId = await getStoredDeviceId();
-  if (!deviceId) return { ok: false, error: 'Device not registered' };
-  if (sessions.length === 0) return { ok: true, result: { created: 0, duplicates: 0, invalid: 0 } };
-
-  console.log(`[Sync] Starting sync: ${sessions.length} sessions for device ${deviceId}`);
-
-  const result = await apiRequest<SyncResult>('/usage/sync/', {
+async function postSyncUsage(deviceId: string, sessions: SyncSession[]) {
+  return apiRequest<SyncResult>('/usage/sync/', {
     method: 'POST',
     body: JSON.stringify({ device_id: deviceId, sessions }),
   });
+}
+
+export async function syncUsage(sessions: SyncSession[]): Promise<{ ok: boolean; result?: SyncResult; error?: string }> {
+  if (sessions.length === 0) return { ok: true, result: { created: 0, duplicates: 0, invalid: 0 } };
+
+  let deviceId = await getStoredDeviceId();
+  if (!deviceId) {
+    const reg = await registerDevice();
+    if (!reg.ok || !reg.deviceId) {
+      return { ok: false, error: reg.error || 'Device not registered' };
+    }
+    deviceId = reg.deviceId;
+  }
+
+  console.log(`[SYNC] Starting sync: ${sessions.length} sessions for device ${deviceId}`);
+  let result = await postSyncUsage(deviceId, sessions);
+
+  if (!result.ok && result.status === 400) {
+    console.log('[SYNC] Sync rejected by server; reconciling device and retrying once');
+    const reg = await registerDevice();
+    if (reg.ok && reg.deviceId) {
+      deviceId = reg.deviceId;
+      result = await postSyncUsage(deviceId, sessions);
+    }
+  }
 
   if (!result.ok) {
-    console.log(`[Sync] Failed: ${result.error}`);
+    console.log(`[SYNC] Failed: ${result.error}`);
     return { ok: false, error: result.error || 'Sync failed' };
   }
 
-  console.log(`[Sync] Success: created=${result.data?.created}, duplicates=${result.data?.duplicates}`);
+  console.log(`[SYNC] Success: created=${result.data?.created}, duplicates=${result.data?.duplicates}`);
   return { ok: true, result: result.data || undefined };
 }
 

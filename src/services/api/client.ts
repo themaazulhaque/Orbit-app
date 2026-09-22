@@ -255,3 +255,15 @@ export async function storeDeviceId(id: string): Promise<void> {
   await SecureStore.setItemAsync('chronicle_device_id', id);
   await syncNativeAuthState();
 }
+
+export async function getStoredDeviceIdentifier(): Promise<string | null> {
+  return SecureStore.getItemAsync('chronicle_device_identifier');
+}
+
+export async function storeDeviceIdentifier(identifier: string): Promise<void> {
+  await SecureStore.setItemAsync('chronicle_device_identifier', identifier);
+}
+
+export async function refreshNativeAuthState(): Promise<void> {
+  await syncNativeAuthState();
+}

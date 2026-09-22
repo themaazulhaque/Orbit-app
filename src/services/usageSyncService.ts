@@ -1,4 +1,5 @@
 import { usageTrackingService } from './usageTrackingService';
+import { registerDevice, refreshNativeAuthState } from './api';
 import { TrackingOperationResult } from '../types';
 
 export interface SyncStatus {
@@ -16,6 +17,11 @@ function notifyListeners() {
 
 function toMessage(result: TrackingOperationResult, fallback: string): string {
   return result.message || fallback;
+}
+
+function indicatesDeviceMissing(message: string | undefined | null): boolean {
+  const text = (message || '').toLowerCase();
+  return text.includes('device is not registered') || text.includes('device not found') || text.includes('not owned');
 }
 
 export const usageSyncService = {
@@ -48,6 +54,19 @@ export const usageSyncService = {
     notifyListeners();
 
     try {
+      const registration = await registerDevice();
+      if (!registration.ok || !registration.deviceId) {
+        const message = registration.kind === 'network'
+          ? 'No internet connection. Please check your connection and try again.'
+          : registration.kind === 'auth'
+            ? 'Your session has expired. Please sign in again.'
+            : (registration.error || 'Device registration failed.');
+        currentStatus = { ...currentStatus, isSyncing: false, lastSyncResult: message };
+        notifyListeners();
+        return { ok: false, message };
+      }
+      await refreshNativeAuthState();
+
       const collectResult = await usageTrackingService.forceCollectUsage();
       if (!collectResult.ok) {
         currentStatus = { ...currentStatus, isSyncing: false, lastSyncResult: collectResult.message };
@@ -55,7 +74,17 @@ export const usageSyncService = {
         return { ok: false, message: collectResult.message };
       }
 
-      const syncResult = await usageTrackingService.forceSyncUsage();
+      let syncResult = await usageTrackingService.forceSyncUsage();
+
+      if (!syncResult.ok && indicatesDeviceMissing(syncResult.message)) {
+        console.log(`[SYNC] Device rejected (${syncResult.message}); re-registering and retrying once`);
+        const reReg = await registerDevice();
+        if (reReg.ok && reReg.deviceId) {
+          await refreshNativeAuthState();
+          syncResult = await usageTrackingService.forceSyncUsage();
+        }
+      }
+
       if (syncResult.ok) {
         const now = new Date().toISOString();
         currentStatus = {
@@ -67,9 +96,10 @@ export const usageSyncService = {
         return { ok: true, message: syncResult.message || `Synced ${syncResult.synced || 0} records` };
       }
 
-      currentStatus = { ...currentStatus, isSyncing: false, lastSyncResult: syncResult.message };
+      const message = toMessage(syncResult, 'Sync failed');
+      currentStatus = { ...currentStatus, isSyncing: false, lastSyncResult: message };
       notifyListeners();
-      return { ok: false, message: syncResult.message };
+      return { ok: false, message };
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Sync error';
       currentStatus = { ...currentStatus, isSyncing: false, lastSyncResult: msg };

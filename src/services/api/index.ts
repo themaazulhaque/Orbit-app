@@ -1,9 +1,9 @@
-export { apiRequest, isAuthenticated, storeTokens, clearTokens, getStoredUserId, getStoredDeviceId, storeDeviceId, getAccessToken, onAuthSessionExpired } from './client';
+export { apiRequest, isAuthenticated, storeTokens, clearTokens, getStoredUserId, getStoredDeviceId, storeDeviceId, getStoredDeviceIdentifier, storeDeviceIdentifier, refreshNativeAuthState, getAccessToken, onAuthSessionExpired } from './client';
 export type { ApiResponse, ApiResponseKind } from './client';
 export { register, login, logout, getCurrentUser } from './auth';
 export type { AuthUser, AuthTokens, LoginRequest, RegisterRequest } from './auth';
 export { registerDevice } from './devices';
-export type { BackendDevice } from './devices';
+export type { BackendDevice, RegisterDeviceResult } from './devices';
 export { syncUsage, getActivity } from './usage';
 export type { SyncSession, SyncResult, ActivitySession, ActivityResponse } from './usage';
 export { fetchReportData } from './report';
